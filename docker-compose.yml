@@ -1,0 +1,116 @@
+services:
+  vault:
+    image: hashicorp/vault:1.20.0
+    container_name: vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID}
+      VAULT_DEV_LISTEN_ADDRESS: ${VAULT_DEV_LISTEN_ADDRESS}
+      VAULT_ADDR: ${VAULT_ADDR}
+    volumes:
+      - vault-data:/vault/data
+      - vault-logs:/vault/logs
+      - ./vault/config:/vault/config:ro
+      - ./vault/policies:/vault/policies:ro
+    cap_add:
+      - IPC_LOCK
+    command: |
+      sh -c "
+        echo 'Starting Vault in development mode...'
+        vault server -dev -dev-root-token-id=$$VAULT_DEV_ROOT_TOKEN_ID -dev-listen-address=$$VAULT_DEV_LISTEN_ADDRESS
+      "
+    healthcheck:
+      test: ["CMD", "sh", "-c", "vault status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - microservices
+
+  vault-init:
+    image: hashicorp/vault:1.20.0
+    container_name: vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR}
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID}
+    volumes:
+      - vault-config:/vault/config
+      - ./vault/scripts:/vault/scripts:ro
+      - ./vault/policies:/vault/policies:ro
+    command: |
+      sh -c "
+        apk add --no-cache curl jq
+        sh /vault/scripts/init-vault.sh
+      "
+    networks:
+      - microservices
+
+  auth-vault-agent:
+    image: hashicorp/vault:1.20.0
+    container_name: auth-vault-agent
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR}
+      SERVICE_NAME: auth-service
+    volumes:
+      - vault-config:/vault/config:ro
+      - ./vault/templates:/vault/templates:ro
+      - ./docker/vault-agent:/vault/agent-config:ro
+      - auth-secrets:/vault/secrets
+      - auth-vault-config:/vault/writable-config # Change "writeable" to "writable"
+    command: |
+      sh -c "
+        mkdir -p /vault/writable-config
+        cp /vault/config/auth-service-role-id /vault/writable-config/role-id
+        cp /vault/config/auth-service-secret-id /vault/writable-config/secret-id
+        vault agent -config=/vault/agent-config/auth-service.hcl
+      "
+    networks:
+      - microservices
+
+  auth-service:
+    build: ./services/auth
+    container_name: auth-service
+    depends_on:
+      - auth-vault-agent
+    volumes:
+      - auth-secrets:/vault/secrets:ro
+    ports:
+      - "${AUTH_SERVICE_PORT}:3001"
+    environment:
+      NODE_ENV: production
+    networks:
+      - microservices
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-check-certificate",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "https://localhost:3001/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  vault-data:
+  vault-logs:
+  vault-config:
+  auth-secrets:
+  auth-vault-config: # Add this
+
+networks:
+  microservices:
+    driver: bridge

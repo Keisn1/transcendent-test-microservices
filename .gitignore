@@ -1,0 +1,40 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Vault data
+vault/data/
+vault/logs/
+vault/file/
+
+# Node modules
+node_modules/
+npm-debug.log*
+
+# SSL certificates and keys
+*.pem
+*.key
+*.crt
+
+# Vault tokens and secrets
+vault-token
+.vault-token
+role-id
+secret-id
+
+# Docker volumes
+docker-volumes/
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
